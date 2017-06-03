@@ -1,0 +1,127 @@
+<?php
+namespace app\index\controller;
+class Index 
+{
+    /**
+     * login []
+     * @return [type] [int]
+     */
+    public function login() {
+        //写入文件记录数据
+        $file = ROOT_PATH.'public/logs/loginLog.txt';
+        //接收从小程序request用POST方式传过来的code,iv
+        $code = input('code') !='' ? input('code') : 'null';
+        $iv = input('iv') != '' ? input('iv') : 'null';
+        $encryptedData = input('encryptedData') != '' ? input('encryptedData') : 'null';
+
+        //AppID(小程序ID)
+        $appid = "你的小程序ID";
+        //AppSecret(小程序密钥)
+        $appSecret = "你的AppSecret(小程序密钥)";
+        //wx.login(OBJECT)调用接口获取登录凭证（code）
+        $js_code = $code;
+        //固定authorization_code
+        $grant_type = "authorization_code";
+        //发起http请求
+        $httpRequestURL = "https://api.weixin.qq.com/sns/jscode2session?appid=".$appid."&secret=".$appSecret."&js_code=".$js_code."&grant_type=".$grant_type;
+        /*正常返回的JSON数据包
+        {
+            "openid": "OPENID",
+            "session_key": "SESSIONKEY"
+        }*/
+        $res = $this->makeRequest($httpRequestURL);
+        //返回是对象，设置true转为数组形式[个人习惯用数组]
+        $result = json_decode($res['result'], true);
+        //获取数组中的session_key
+        $session_key = $result['session_key'];
+        //获取数组中的openid
+        $openid = $result['openid'];
+
+        //实例化WxBizDataCrypt类
+        $pc = new WxBizDataCrypt($appid, $session_key);
+        //检验数据的真实性，并且获取解密后的明文.成功0，失败返回对应的错误码
+        $errCode = $pc->decryptData($encryptedData, $iv, $data );
+        //时间
+        $time = date('Y-m-d H:i:s', time());
+        //要写入文件的内容
+        $logContent = "code码:".$code."   "."iv:".$iv."   "."encryptedData:".$encryptedData."   "."httpRequestURL:".$httpRequestURL."    "."session_key:".$session_key."     "."openid:".$openid."       "."errorCode".$errCode."        "."time时间:".$time."\n";
+        file_put_contents($file, $logContent, FILE_APPEND | LOCK_EX);
+        //返回数据
+        if ($errCode == 0) {
+            return $data;
+        } else {
+            return $errCode;
+        }
+    }
+
+    /**
+     * 发起http请求
+     * @param string $url 访问路径
+     * @param array $params 参数，该数组多于1个，表示为POST
+     * @param int $expire 请求超时时间
+     * @param array $extend 请求伪造包头参数
+     * @param string $hostIp HOST的地址
+     * @return array    返回的为一个请求状态，一个内容
+     */
+    public function makeRequest($url, $params = array(), $expire = 0, $extend = array(), $hostIp = '')
+    {
+        if (empty($url)) {
+            return array('code' => '100');
+        }
+
+        $_curl = curl_init();
+        $_header = array(
+            'Accept-Language: zh-CN',
+            'Connection: Keep-Alive',
+            'Cache-Control: no-cache'
+        );
+        // 方便直接访问要设置host的地址
+        if (!empty($hostIp)) {
+            $urlInfo = parse_url($url);
+            if (empty($urlInfo['host'])) {
+                $urlInfo['host'] = substr(DOMAIN, 7, -1);
+                $url = "http://{$hostIp}{$url}";
+            } else {
+                $url = str_replace($urlInfo['host'], $hostIp, $url);
+            }
+            $_header[] = "Host: {$urlInfo['host']}";
+        }
+
+        // 只要第二个参数传了值之后，就是POST的
+        if (!empty($params)) {
+            curl_setopt($_curl, CURLOPT_POSTFIELDS, http_build_query($params));
+            curl_setopt($_curl, CURLOPT_POST, true);
+        }
+
+        if (substr($url, 0, 8) == 'https://') {
+            curl_setopt($_curl, CURLOPT_SSL_VERIFYPEER, FALSE);
+            curl_setopt($_curl, CURLOPT_SSL_VERIFYHOST, FALSE);
+        }
+        curl_setopt($_curl, CURLOPT_URL, $url);
+        curl_setopt($_curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($_curl, CURLOPT_USERAGENT, 'API PHP CURL');
+        curl_setopt($_curl, CURLOPT_HTTPHEADER, $_header);
+
+        if ($expire > 0) {
+            curl_setopt($_curl, CURLOPT_TIMEOUT, $expire); // 处理超时时间
+            curl_setopt($_curl, CURLOPT_CONNECTTIMEOUT, $expire); // 建立连接超时时间
+        }
+
+        // 额外的配置
+        if (!empty($extend)) {
+            curl_setopt_array($_curl, $extend);
+        }
+
+        $result['result'] = curl_exec($_curl);
+        $result['code'] = curl_getinfo($_curl, CURLINFO_HTTP_CODE);
+        $result['info'] = curl_getinfo($_curl);
+        if ($result['result'] === false) {
+            $result['result'] = curl_error($_curl);
+            $result['code'] = -curl_errno($_curl);
+        }
+
+        curl_close($_curl);
+        return $result;
+    }
+
+}
